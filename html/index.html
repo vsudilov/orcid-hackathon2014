@@ -1,0 +1,111 @@
+<html>
+  <head>
+    <script src="../static/js/jquery-2.0.2.min.js"></script>
+    <script src="../static/js/d3.v3.min.js"></script>
+    <script src="../static/js/d3.geo.tile.v0.min.js"></script>
+    <script src="../static/js/vis_map.js"></script>
+    <script src="../static/js/jquery-ui.min.js"></script>
+    <!-- data via global namespace. Change in production to be more sane. -->
+    <script src="../data/data.json"></script>
+    <link rel="stylesheet" href="../static/css/jquery-ui.css"/>
+    <script>
+      $(document).ready(function() {
+        vis_map(data)
+      })
+    </script>
+    <style>
+
+      .map {
+        position: relative;
+        overflow: hidden;
+      }
+
+      .layer {
+        position: absolute;
+      }
+
+      .tile {
+        pointer-events: none;
+        position: absolute;
+     /*   width: 256px;
+        height: 256px;*/
+      }
+
+      .info {
+        position: absolute;
+        bottom: 10px;
+        left: 10px;
+      }
+
+      .slider-container {
+        margin-left:50px;
+        margin-top:10px;
+        margin-bottom:;
+        width:500px;
+      }
+
+      .slider-container #slider-label {
+        margin-top:10px;
+      }
+
+      .slider-container #slider-label-text {
+        border: 0; 
+        font-weight: bold;
+      }
+
+      #group-selection-widget {
+        /*float: right;*/
+        display: inline-block;
+      }
+
+      #svg-container-vis_map {
+        float: left;
+        display: inline-block;
+        border: 1px solid gray;
+        border-radius: 25px;
+        overflow:hidden;
+      }
+      #group-selection-widget ul li {
+        width: 10em;
+        height: 1.5em;
+        font-weight: bold;
+        font-size: 1.5em;
+        text-align: center;
+        list-style: none;
+        opacity: 0.4;
+        border:1px solid gray;
+        border-radius:25px;
+        margin-bottom:2px;
+      }
+      #group-selection-widget ul li.active {
+        opacity:1.0;
+      }
+
+
+    </style>
+
+  </head>
+
+  <body>
+
+    <div class="slider-container">
+      <div id="year-slider"></div>
+      <div id="slider-label">
+        <input type="text" id="slider-label-text"/>
+      </div>
+    </div>
+    
+    <div class="container">
+      
+      <div id="svg-container-vis_map">
+      </div>
+      
+      <div id="group-selection-widget">
+          <ul>
+          </ul>
+      </div>
+
+    </div>
+  </body>
+
+</html>
