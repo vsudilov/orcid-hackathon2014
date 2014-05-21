@@ -1,123 +1,98 @@
-function vis_map(data){
-  //Object responsible for storing data filters
-  //and returning a filtered (original) dataset based on these
-  
-  var DataFilter = {
-    //filters contain functions that return true|false.
-    //true=throw away that datum; false=keep that datum.
-    //
-    //The testing logic is wrapped in these functions--The
-    //DataFilter object is agnostic of what that is.
-    filters: [],
-    run: function () { 
-      var filteredData = []
-      var filters = this.filters
-      $.each(data,function(d_index,datum){
-        for (var i = 0; i<filters.length; i++ ) { //difficult to break nested $.each(); fallback to native forloop
-          if ( filters[i].filter(datum) ) {
-            filteredData.push(datum)
-            break;
+// var dateDiff = function (d1,d2) { 
+//   var aDay = 24*60*60*1000;
+//   return Math.abs((d1.getTime()-d2.getTime())/aDay);
+// }
+
+function submit(){
+  var oid = $('input#oid').val()
+  var api_query = 'http://pub.orcid.org/v1.2_rc4/'+oid+"/orcid-profile?callback=?"
+  $.ajax({
+    url: api_query,
+    type: 'GET',
+    dataType: 'json',
+    success: function(data) {
+      console.log(data)
+      var d = data['orcid-profile']
+      var employment = d['orcid-activities']['affiliations']['affiliation']
+      var works = d['orcid-activities']['orcid-works']['orcid-work']
+      var oid = d['orcid-identifier']['path']
+      var name = d['orcid-bio']['personal-details']['family-name'].value+', '+d['orcid-bio']['personal-details']['given-names'].value
+      $.each(employment,function(index,v) {
+        var city = v['organization']['address']['city']
+        var country = v['organization']['address']['country']
+        var geocode_url = "https://maps.googleapis.com/maps/api/geocode/json?address="+city+'+,'+country
+        // v.organization.lat = 42.3736158
+        // v.organization.lng = -71.10973349999999
+        $.ajax({
+          url: geocode_url,
+          async: false,
+          success: function(data) {
+            var lat = data.results[0].geometry.location.lat
+            var lng = data.results[0].geometry.location.lng
+            v['organization']['lat'] = lat
+            v['organization']['lng'] = lng
           }
-        }
+        })     
       })
-      var newVisData = $.grep(data,function(x) {return $.inArray(x, filteredData) < 0}) //difference (set)
-      return newVisData
-    },
-    removePreviousFiltersByType: function(t) {
-      var newFilters = []
-      $.each(this.filters,function(index,val){
-        if (val.type != t) {
-          newFilters.push(val)
-        }
-      })
-      this.filters = newFilters
-    },
-  }
-
-  //Analyze input dataset to set proper limits/scales on the visualization
-  var colors = d3.scale.category20()
-  var categories = {}
-
-  $.each(data,function(index,v){
-    if ( !(v.category in categories) ) {
-      categories[v.category] = {color: colors(Object.keys(categories).length)}
+      vis_map(name,oid,employment,works)
     }
   })
+}
 
-  var legend = d3.select('#group-selection-widget ul')
-    .selectAll('li')
-    .data(Object.keys(categories))
-    .enter()
-    .append('li')
-      .text(function(d){return d})
-      .attr('class','active')
-      .style('color',function(d) {return categories[d].color })
-  
-  legend.on('click',function(d){
-    var toggleActive = function (ele) {
-      if ( ele.hasClass('active') ) {
-        ele.removeClass('active')
-      } else {
-        ele.addClass('active')
-      }
-    }
-    //first toggle css class...this causes problems if we rapid-fire toggles with d3.transitions!
-    toggleActive($(this))
-    //second hook into the filter pipeline
-    DataFilter.removePreviousFiltersByType('categoryFilter')
-    $.each($('#group-selection-widget li:not(.active)'),function(index,val){
-      var filter = {
-        type:'categoryFilter',
-        testCase: val.textContent,
-        filter: function(datum){
-          //if the test passes, then we filter it (return true=don't show this datum)
-          return (datum.category == this.testCase) ? true:false
-        },
-      }
-      DataFilter.filters.push(filter)
-    })
-    updateVis(DataFilter.run())
-  })
-
-  var daterange = [d3.min(data,function(d){return d.date}),d3.max(data, function(d){return d.date})]
-
-  var rscale = d3.scale.linear()
-    .domain([d3.min(data,function(d){return d.duration}),d3.max(data, function(d){return d.duration})])
-    .range([70,5500])
-    .nice();
-  //
-
-  //jquery-ui slider setup
-  $( "#year-slider" ).slider({
-    range: true,
-    min: daterange[0],
-    max: daterange[1],
-    values: daterange,
-    change: function (event, ui ){
-      DataFilter.removePreviousFiltersByType('yearFilter')
-      var filter = {
-        type:'yearFilter',
-        testCase: [ui.values[0],ui.values[1]],
-        filter: function(datum){
-          //if the test passes, then we filter it (return true=don't show this datum)
-          return (datum.date >= this.testCase[0] && datum.date <= this.testCase[1]) ? false:true
-        },
-      }
-      DataFilter.filters.push(filter)
-      updateVis(DataFilter.run())
-    },
-    slide: function( event, ui ) {
-      $( "#slider-label-text" ).val( ui.values.join(' - ') );
-    }
-  });
-    //Set the initial values outside of change, so we don't have to put null checking logic in the event handler
-  $( "#slider-label-text" ).val( daterange.join(' - '))
-  //
-
-
+function vis_map(name,oid,employment,works){
+  var data = employment
   //var width = 256*5, //5 tiles of 256 pixels each.
   var width = Math.max(600, window.innerWidth*0.6),
       height = Math.max(400, window.innerHeight*0.8);
+
+  $.each(data,function(index,v){
+    v.name = v['department-name']
+    v.nworks = 0
+
+    var getDate = function (d) {
+      if (d.hasOwnProperty('year')) {
+        var year = d['year'].value || 0
+      } else {
+        var year = 0
+      }
+
+      if (d.hasOwnProperty('month')) {
+        var month = d['month'].value || 0
+      } else {
+        var month = 0
+      }
+
+      if (d.hasOwnProperty('day')) {
+        var day = d['day'].value || 0
+      } else {
+        var day = 0
+      }
+
+      return new Date(year,month,day)
+    }
+
+    var sdate = getDate(v['start-date'])
+    if (v.hasOwnProperty('end-date')) {
+      var edate = getDate(v['end-date'])
+    }
+    else {
+      var edate = new Date()
+    }
+
+    $.each(works,function(index,work){
+      var pub_date = getDate(work['publication-date'])
+      //var pub_date = new Date(work['publication-date'].year.value,work['publication-date'].month.value || 0,work['publication-date'].day.value || 0 )
+      if (pub_date > sdate && pub_date < edate) {
+        v.nworks = v.nworks + 1
+      }
+    })
+
+  })
+
+  var rscale = d3.scale.linear()
+    .domain([d3.min(data,function(d){return d.nworks}),d3.max(data, function(d){return d.nworks})])
+    .range([700,5500])
+    .nice();
 
   var tile = d3.geo.tile()
       .size([width, height]);
@@ -155,11 +130,11 @@ function vis_map(data){
       .data(data)
   bubbles.enter()
       .append("g")
-        .attr("transform",function(d){return "translate("+projection([d.lng,d.lat])+")scale("+projection.scale()+")"})
+        .attr("transform",function(d){return "translate("+projection([d.organization.lng,d.organization.lat])+")scale("+projection.scale()+")"})
         .attr("class","bubble")
 
   bubbles.append("circle")
-      .attr("fill",function(d) {return categories[d.category].color})
+      .attr("fill",function(d) {return "blue"})
         
   // var text = bubbles.append("text")
   //      .attr("text-anchor","middle")
@@ -184,7 +159,7 @@ function vis_map(data){
           
     bubbleG
       .selectAll("circle")
-      .attr('r', function(d) { return Math.sqrt(rscale(d.duration))/zoom.scale()})
+      .attr('r', function(d) { return Math.sqrt(rscale(d.nworks))/zoom.scale()})
       .append('svg:title')
       .text(function(d) { return d.name; });
 
@@ -221,14 +196,15 @@ function vis_map(data){
 
     var enter = bg.enter()
       .append("g")
-        .attr("transform",function(d){return "translate("+projection([d.lng,d.lat])+")scale("+projection.scale()+")"})
+        .attr("transform",function(d){return "translate("+projection([d.organization.lng,d.organization.lat])+")scale("+projection.scale()+")"})
         .attr("class","bubble")
 
     var c = enter.append("circle")
       .attr("fill",function(d) {return categories[d.category].color})
       .attr("r",1e-5)    
       .transition().duration(500)
-      .attr("r", function(d) { return Math.sqrt(rscale(d.duration))/zoom.scale()})
+      .attr("r", function(d) { return Math.sqrt(rscale(d.nworks))/zoom.scale()})
+//      .attr("r", function(d) { return 5000/zoom.scale()})
       .append('svg:title')
       .text(function(d) { return d.name; });
   }

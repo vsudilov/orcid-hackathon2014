@@ -6,13 +6,8 @@
     <script src="../static/js/vis_map.js"></script>
     <script src="../static/js/jquery-ui.min.js"></script>
     <!-- data via global namespace. Change in production to be more sane. -->
-    <script src="../data/data.json"></script>
     <link rel="stylesheet" href="../static/css/jquery-ui.css"/>
-    <script>
-      $(document).ready(function() {
-        vis_map(data)
-      })
-    </script>
+
     <style>
 
       .map {
@@ -88,13 +83,17 @@
 
   <body>
 
-    <div class="slider-container">
+<!--     <div class="slider-container">
       <div id="year-slider"></div>
       <div id="slider-label">
         <input type="text" id="slider-label-text"/>
       </div>
-    </div>
+    </div> -->
     
+    <form action="javascript:submit();">
+      <input id="oid" type="text" value="0000-0002-3291-6617">
+      <input class="button" type="submit" value="Go!">
+    </form>
     <div class="container">
       
       <div id="svg-container-vis_map">
