@@ -12,17 +12,20 @@ function submit(){
     dataType: 'json',
     success: function(data) {
       console.log(data)
-      var d = data['orcid-profile']
-      var employment = d['orcid-activities']['affiliations']['affiliation']
+      //This assumes the entire schema is present; it will break in many cases since this doesnt not hold
+      //for the entire dataset
+      var d = data['orcid-profile'] 
       var works = d['orcid-activities']['orcid-works']['orcid-work']
       var oid = d['orcid-identifier']['path']
       var name = d['orcid-bio']['personal-details']['family-name'].value+', '+d['orcid-bio']['personal-details']['given-names'].value
+      var employment = d['orcid-activities']['affiliations']['affiliation']
+
       $.each(employment,function(index,v) {
         var city = v['organization']['address']['city']
         var country = v['organization']['address']['country']
         var geocode_url = "https://maps.googleapis.com/maps/api/geocode/json?address="+city+'+,'+country
-        // v.organization.lat = 42.3736158
-        // v.organization.lng = -71.10973349999999
+
+        //async:false just to not run into google public API problems.
         $.ajax({
           url: geocode_url,
           async: false,
@@ -40,58 +43,105 @@ function submit(){
 }
 
 function vis_map(name,oid,employment,works){
+
   var data = employment
   //var width = 256*5, //5 tiles of 256 pixels each.
   var width = Math.max(600, window.innerWidth*0.6),
       height = Math.max(400, window.innerHeight*0.8);
 
-  $.each(data,function(index,v){
-    v.name = v['department-name']
-    v.nworks = 0
+  d3.select('body').append('div')
+    .style('margin-left',width+50)
+    .style('font-size','1.5em')
+    .text(name)
 
-    var getDate = function (d) {
-      if (d.hasOwnProperty('year')) {
-        var year = d['year'].value || 0
-      } else {
-        var year = 0
-      }
 
-      if (d.hasOwnProperty('month')) {
-        var month = d['month'].value || 0
-      } else {
-        var month = 0
-      }
-
-      if (d.hasOwnProperty('day')) {
-        var day = d['day'].value || 0
-      } else {
-        var day = 0
-      }
-
-      return new Date(year,month,day)
+  //Sanitization function in the case that day/month/year isn't in the schema
+  //This is still way too fragile!
+  var isEmpty = function (f) {
+     if (f == null || f.value == null || f.value.trim() == '') 
+       return true;
+     return false;
+  }
+  var getDate = function (d) {
+    if (d.hasOwnProperty('year')) {
+      var year = d['year'].value || 0
+    } else {
+      var year = 0
     }
 
-    var sdate = getDate(v['start-date'])
+    if (d.hasOwnProperty('month')) {
+      var month = isEmpty(d['month']) ? 0 : d['month'].value;
+    } else {
+      var month = 0
+    }
+
+    if (d.hasOwnProperty('day')) {
+      var day = isEmpty(d['day']) ? 0 : d['day'].value;
+    } else {
+      var day = 0
+    }
+
+    return new Date(year,month,day)
+  }
+
+  var data = []
+  var folding = {}
+
+  $.each(employment, function(index,v){
+
+    //TUM resolves to Munich correctly, but I'll override as Garching for display reasons
+    if (v.organization.address.city == "Munchen") {
+      v.organization.address.city = "Garching"
+    }
+    var name = v.organization.address.city + ', ' + v.organization.address.country
     if (v.hasOwnProperty('end-date')) {
       var edate = getDate(v['end-date'])
     }
     else {
       var edate = new Date()
     }
+    var sdate = getDate(v['start-date'])
+    if ( !folding.hasOwnProperty(name) ) {  
+      data.push({
+        'lat': v.organization.lat,
+        'lng': v.organization.lng,
+        'nworks':0,
+        'city': v.organization.address.city,
+        'country': v.organization.address.country,
+        'name': name,
+        'works': [],
+      })
+      folding[name] = []
+    }
+    folding[name].push({sdate:sdate,edate:edate})
+  })
 
-    $.each(works,function(index,work){
-      var pub_date = getDate(work['publication-date'])
-      //var pub_date = new Date(work['publication-date'].year.value,work['publication-date'].month.value || 0,work['publication-date'].day.value || 0 )
-      if (pub_date > sdate && pub_date < edate) {
-        v.nworks = v.nworks + 1
+  //Since we've folded the affiliation data, we need to pick 
+  //the start/end dates based on the earliest and latest dates from
+  //the unfolded data
+  $.each(folding,function(name,dates){
+    $.each(data,function(index,v){
+      if (name==v.name) {
+        v.sdate = d3.min(dates,function(d){return d.sdate })
+        v.edate = d3.max(dates,function(d){return d.edate })
       }
     })
+  })
 
+  //Increment publication data associated with each (folded) affiliation
+  $.each(data,function(index,v){
+    $.each(works,function(index,work){
+      var pub_date = getDate(work['publication-date'])
+      if (pub_date > v.sdate && pub_date < v.edate) {
+        v.nworks = v.nworks + 1
+        v.works.push(work['work-title'].title.value)
+      }
+    })
   })
 
   var rscale = d3.scale.linear()
     .domain([d3.min(data,function(d){return d.nworks}),d3.max(data, function(d){return d.nworks})])
-    .range([700,5500])
+    .range([500,4500])
     .nice();
 
   var tile = d3.geo.tile()
@@ -128,22 +178,21 @@ function vis_map(name,oid,employment,works){
 
   var bubbles = bubbleG.selectAll(".bubble")
       .data(data)
+  
   bubbles.enter()
       .append("g")
-        .attr("transform",function(d){return "translate("+projection([d.organization.lng,d.organization.lat])+")scale("+projection.scale()+")"})
+        .attr("transform",function(d){return "translate("+projection([d.lng,d.lat])+")scale("+projection.scale()+")"})
         .attr("class","bubble")
 
   bubbles.append("circle")
       .attr("fill",function(d) {return "blue"})
-        
-  // var text = bubbles.append("text")
-  //      .attr("text-anchor","middle")
-  //      //.attr("transform", 'translate(0,-18)')
-  //      .attr('fill','red')
-  //      .attr('font-size',10)
-  //      .text(function(d) {
-  //        return d.name;
-  //      });
+
+  var tooltip = d3.selectAll("body")
+    .append("div")
+    .style('visibility','hidden')
+    .style('margin-left',width+20)
+    .style('font-size',"1.2em")
+    .attr("class","tooltip")
 
   svg.call(zoom)
   zoomed()
@@ -153,18 +202,6 @@ function vis_map(name,oid,employment,works){
         .scale(zoom.scale())
         .translate(zoom.translate())
         ();
-
-    bubbleG
-     .attr("transform",function(d){return "translate("+zoom.translate()+")scale("+zoom.scale()+")"})
-          
-    bubbleG
-      .selectAll("circle")
-      .attr('r', function(d) { return Math.sqrt(rscale(d.nworks))/zoom.scale()})
-      .append('svg:title')
-      .text(function(d) { return d.name; });
-
-    // text
-    //   .attr('font-size',100/zoom.scale())
 
     var image = raster
         .attr("transform", "scale(" + tiles.scale + ")translate(" + tiles.translate + ")")
@@ -182,31 +219,28 @@ function vis_map(name,oid,employment,works){
         .attr("x", function(d) { return d[0]; })
         .attr("y", function(d) { return d[1]; })
         .style("opacity",0.4)
-  }
 
-  function updateVis(newVisData) {
-    var bg = bubbleG.selectAll('.bubble')
-      .data(newVisData, function(d) {return d.name})
 
-    var exit = bg.exit()
-    exit.transition().duration(500)
+    bubbleG
+     .attr("transform",function(d){return "translate("+zoom.translate()+")scale("+zoom.scale()+")"})
+        
+    bubbleG
       .selectAll("circle")
-      .attr("r",1e-5)
-    exit.transition().delay(500).remove()
+      .attr('r', function(d) { return Math.sqrt(rscale(d.nworks))/zoom.scale()})
+        .on("mouseover", function(d){
+          d3.select(this).transition().duration(1000)
+            .attr('fill','red')
 
-    var enter = bg.enter()
-      .append("g")
-        .attr("transform",function(d){return "translate("+projection([d.organization.lng,d.organization.lat])+")scale("+projection.scale()+")"})
-        .attr("class","bubble")
+          tooltip.style('visibility','visible')
+          var t = d.works.join("<br>")
+          tooltip.html(t)
+        })
+        .on("mouseout", function(d){
+          d3.select(this).transition().duration(1000)
+            .attr('fill','blue')
+          tooltip.style('visibility','hidden')
+        })     
 
-    var c = enter.append("circle")
-      .attr("fill",function(d) {return categories[d.category].color})
-      .attr("r",1e-5)    
-      .transition().duration(500)
-      .attr("r", function(d) { return Math.sqrt(rscale(d.nworks))/zoom.scale()})
-//      .attr("r", function(d) { return 5000/zoom.scale()})
-      .append('svg:title')
-      .text(function(d) { return d.name; });
   }
 
 }
